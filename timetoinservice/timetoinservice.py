@@ -82,14 +82,18 @@ def get_cluster_and_container_instance_name(instance_id):
     container_instance_arn = None
     for cluster in clusters:
         container_instances = ecs.list_container_instances(cluster=cluster)['containerInstanceArns']
-        response = ecs.describe_container_instances(
-            cluster=cluster,
-            containerInstances=container_instances
-        )
-        container_instance_arn = [instance['containerInstanceArn'] for instance in response['containerInstances'] if instance['ec2InstanceId'] == instance_id][0]
-        if container_instance_arn:
-            logging.info(json.dumps({"message": "finding cluster and container instance", "cluster": cluster, "container_instance_arn": container_instance_arn}))
-            return {"cluster": cluster, "container_instance_arn": container_instance_arn}
+        if container_instances != []:
+            response = ecs.describe_container_instances(
+                cluster=cluster,
+                containerInstances=container_instances
+            )
+            try:
+                container_instance_arn = [instance['containerInstanceArn'] for instance in response['containerInstances'] if instance['ec2InstanceId'] == instance_id][0]
+                if container_instance_arn:
+                    logging.info(json.dumps({"message": "finding cluster and container instance", "cluster": cluster, "container_instance_arn": container_instance_arn}))
+                    return {"cluster": cluster, "container_instance_arn": container_instance_arn}
+            except IndexError:
+                pass
     raise Exception('Could not find instance on any cluster')
 
 
@@ -191,9 +195,20 @@ def put_time_to_in_service_from_event(event):
             ]
         )
 
+@app.route('/timetoinservice/health', methods=['GET'])
+def flask_health():
+    return json.dumps({'health': 'OK'})
+
+@app.route('/timetoinservice/registertargets', methods=['POST'])
+def flask_handler():
+    data = request.to_json(force=True)
+    logging.debug(json.dumps({"message": "received post", "data": data}))
+    event = data['Message']
+    return json.dumps({'status': 'done'})
+
 
 if __name__ == '__main__':
-    get_container_request_time('i-07fc028177d6d5c6d', 32769)
+    app.run(host='0.0.0.0')
 #    cloudtrail = boto3.client('cloudtrail')
 #    response = cloudtrail.lookup_events(
 #        LookupAttributes=[

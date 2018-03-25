@@ -1,0 +1,27 @@
+{
+    "containerDefinitions": [
+        {
+            "essential": true,
+            "image": "aarongorka/timetoinservice:${BUILD_VERSION}",
+            "name": "TimeToInService",
+            "portMappings": [
+                {
+                    "containerPort": 5000
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "ecs-${ECS_APP_NAME}-${ENV}",
+                    "awslogs-region": "ap-southeast-2",
+                    "awslogs-stream-prefix": "${BUILD_VERSION}"
+                }
+            }
+        }
+    ],
+    "taskRoleArn": "${ECS_TASK_ROLE_ARN}",
+    "memory": "128",
+    "cpu": "128",
+    "family": "${ECS_APP_NAME}-${ENV}",
+    "volumes": []
+}
