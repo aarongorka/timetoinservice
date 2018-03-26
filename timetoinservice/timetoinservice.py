@@ -9,6 +9,8 @@ import json
 from flask import Flask,request
 from functools import wraps
 import requests
+import time
+import timeout_decorator
 
 """
 * RegisterTarget event
@@ -60,37 +62,55 @@ def get_instance_request_time(instance_id):
     if instance['InstanceLifecycle'] == 'spot':
         spot_request_id = instance['SpotInstanceRequestId']
         logging.info(json.dumps({"message": "getting spot request time", "instance_id": instance_id, "spot_request_id": spot_request_id}))
-        cloudtrail = boto3.client('cloudtrail')
-        response = cloudtrail.lookup_events(
-            LookupAttributes=[
-                {
-                    'AttributeKey': 'ResourceName',
-                    'AttributeValue': spot_request_id
-                }
-            ],
-            StartTime=datetime.utcnow() - timedelta(minutes=60),
-            EndTime=datetime.utcnow()
-        )
+        lookup_attributes=[
+            {
+                'AttributeKey': 'ResourceName',
+                'AttributeValue': spot_request_id
+            }
+        ]
+        try:
+            response = wait_for_cloudtrail_query(lookup_attributes)
+        except TimeoutError:
+            logging.exception(json.dumps({"message": "timed out getting spot instance request info"}))
+            return
         event = [x for x in response['Events'] if x['EventName'] == 'RequestSpotInstances'][0]
         request_time = event['EventTime']
         logging.info(json.dumps({"message": "found spot request time", "instance_id": instance_id, "spot_request_id": spot_request_id, "request_time": request_time.timestamp()}))
     else:
         logging.info(json.dumps({"message": "getting on-demand request time", "instance_id": instance_id}))
-        cloudtrail = boto3.client('cloudtrail')
-        response = cloudtrail.lookup_events(
-            LookupAttributes=[
-                {
-                    'AttributeKey': 'ResourceName',
-                    'AttributeValue': instance_id
-                }
-            ],
-            StartTime=datetime.utcnow() - timedelta(minutes=10),
-            EndTime=datetime.utcnow()
-        )
+        lookup_attributes=[
+            {
+                'AttributeKey': 'ResourceName',
+                'AttributeValue': instance_id
+            }
+        ]
+        try:
+            response = wait_for_cloudtrail_query(lookup_attributes)
+        except TimeoutError:
+            logging.exception(json.dumps({"message": "timed out getting spot instance request info"}))
+            return
         event = [x for x in response['Events'] if x['EventName'] == 'CreateInstance'][0]
         request_time = event['EventTime']
         logging.info(json.dumps({"message": "got on-demand request time", "instance_id": instance_id, "request_time": request_time.timestamp()}))
     return request_time
+
+
+@timeout_decorator.timeout(60)
+def wait_for_cloudtrail_query(lookup_attributes):
+    logging.info(json.dumps({"message": "beginning to poll for cloudtrail event", "lookup_attributes": lookup_attributes}))
+    if response['Events'] == []:
+        while response['Events'] == []:
+            cloudtrail = boto3.client('cloudtrail')
+            response = cloudtrail.lookup_events(
+                LookupAttributes=lookup_attributes,
+                StartTime=datetime.utcnow() - timedelta(minutes=120),
+                EndTime=datetime.utcnow()
+            )
+        if response['Events'] == []:
+            logging.info(json.dumps({"message": "cloudtrail event not found, sleeping", "lookup_attributes": lookup_attributes}))
+            time.sleep(5)
+        else:
+            return response
 
 
 def get_cluster_and_container_instance_name(instance_id):
@@ -115,7 +135,8 @@ def get_cluster_and_container_instance_name(instance_id):
                     return {"cluster": cluster, "container_instance_arn": container_instance_arn}
             except IndexError:
                 pass
-    raise Exception('Could not find instance on any cluster')
+    logging.warning(json.dumps({"message": "could not find container instance on any cluster"}))
+    return None
 
 
 def get_task_from_port(tasks, port):
@@ -127,7 +148,8 @@ def get_task_from_port(tasks, port):
                 if network_binding.get('hostPort') == port:
                     logging.info(json.dumps({"message": "deriving task from instance and port", "task": task}, default=str))
                     return task
-    raise Exception('Could not find task on any cluster')
+    logging.warning(json.dumps({"message": "could not find task on any cluster"}))
+    return None
 
 
 def get_container_request_time(instance_id, port):
@@ -146,7 +168,7 @@ def get_container_request_time(instance_id, port):
     task = get_task_from_port(response['tasks'], port)
     created_at = task['createdAt']
     logging.info(json.dumps({"message": "retrieving container request time", "created_at": created_at.timestamp(), "instance_id": instance_id, "port": port, "cluster": cluster, "container_instance_arn": container_instance_arn}))
-    return 
+    return
 
 
 def get_healthy_time(target_group_arn, instance_id, port):
@@ -185,31 +207,6 @@ def get_healthy_time(target_group_arn, instance_id, port):
     return time
 
 
-def get_time_to_in_service_from_event(event):
-    """Calculate and upload the TimeToInService metric from a given RegisterTarget event"""
-
-    logging.info(json.dumps({"message": "received event", "event": event}))
-    targets = event['requestParameters']['targets']
-    target_group_arn = event['requestParameters']['targetGroupArn']
-    target_group = target_group_arn.split(':')[-1]
-    if event['userIdentity']['invokedBy'] == 'ecs.amazonaws.com':
-        event_type = 'ecs'
-    else:
-        event_type = 'ec2'
-    for target in targets:
-        instance_id = target['id']
-        port = target.get('port', None)
-        if event_type == 'ecs':
-            request_time = get_container_request_time(instance_id, port)
-        elif event_type == 'ec2':
-            request_time = get_instance_request_time(instance_id)
-        healthy_time = get_healthy_time(target_group_arn, instance_id, port)
-        if not healthy_time:
-            return None
-        time_to_in_service = (healthy_time - request_time)
-        logging.info(json.dumps({"message": "TimeToInService calculated", "TimeToInService": time_to_in_service.seconds, "target_group_arn": target_group_arn}))
-        return time_to_in_service.seconds
-
 def put_cw_data(target_group, seconds):
         cloudwatch = boto3.client('cloudwatch')
         response = cloudwatch.put_metric_data(
@@ -223,6 +220,35 @@ def put_cw_data(target_group, seconds):
                 }
             ]
         )
+
+
+def put_time_to_in_service_from_event(event):
+    """Calculate and upload the TimeToInService metric from a given RegisterTarget event"""
+
+    logging.info(json.dumps({"message": "received event", "event": event}))
+    targets = event['requestParameters']['targets']
+    target_group_arn = event['requestParameters']['targetGroupArn']
+    target_group = target_group_arn.split(':')[-1]
+    if event['userIdentity']['invokedBy'] == 'ecs.amazonaws.com':
+        event_type = 'ecs'
+    else:
+        event_type = 'ec2'
+    for target in targets:
+        instance_id = target['id']
+        port = target.get('port', None)
+        healthy_time = get_healthy_time(target_group_arn, instance_id, port)
+        if not healthy_time:
+            logging.info(json.dumps({"message": "service already healthy, coud not retrieve seconds"}))
+            return
+        if event_type == 'ecs':
+            request_time = get_container_request_time(instance_id, port)
+        elif event_type == 'ec2':
+            request_time = get_instance_request_time(instance_id)
+        time_to_in_service = (healthy_time - request_time)
+        logging.info(json.dumps({"message": "TimeToInService calculated", "TimeToInService": time_to_in_service.seconds, "target_group_arn": target_group_arn}))
+
+        put_cw_data(seconds, target_group)
+
 
 @app.route('/timetoinservice/health', methods=['GET'])
 def flask_health():
@@ -241,27 +267,17 @@ def flask_handler():
         logging.info(json.dumps({'subscription confirmation': 'sent', 'response': response.status_code}))
         return '', 200
 
-    seconds = None
     try:
         event = json.loads(data['Message']).get('detail')
         if event.get('eventName') != "RegisterTargets":
             logging.info(json.dumps({"message": "not a RegisterTargets event, doing nothing"}))
             return '', 204
-        seconds = get_time_to_in_service_from_event(event)
+        put_time_to_in_service_from_event(event)
     except:
-        logging.exception(json.dumps({"message": "failed to get seconds"}))
+        logging.exception(json.dumps({"message": "failed to put time_to_in_seconds"}))
         return '', 500
 
-    if seconds:
-        target_group_arn = event['requestParameters']['targetGroupArn']
-        target_group = target_group_arn.split(':')[-1]
-        put_cw_data(seconds, target_group)
-    else:
-        logging.info(json.dumps({"message": "service already healthy, coud not retrieve seconds"}))
-        return '', 200
-
     return json.dumps({'status': 'done'})
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0')
@@ -280,4 +296,4 @@ if __name__ == '__main__':
 #    events = response['Events']
 #    logging.info(json.dumps({"message": "looking up RegisterTarget events", "num": len(events), "events": events}))
 #    for event in events:
-#        get_time_to_in_service_from_event(event)
+#        put_time_to_in_service_from_event(event)
