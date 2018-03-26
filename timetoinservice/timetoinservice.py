@@ -32,6 +32,22 @@ aws_lambda_logging.setup(level=os.environ.get('LOGLEVEL', 'INFO'), env=os.enviro
 
 app = Flask(__name__)
 
+
+def set_region():
+    region = None
+    session = boto3.session.Session()
+    region = session.region_name
+    if region: # already defined in env var or config file
+        return
+    else:
+        try:
+            region = requests.get("http://169.254.169.254/latest/dynamic/instance-identity/document").json()['region']
+            boto3.setup_default_session(region_name=region)
+        except:
+            logging.exception(json.dumps({"message": "getting region failed from instance metadata failed"}))
+            pass
+
+
 def get_instance_request_time(instance_id):
     """For a given instance-id, return the time of the earliest relevant event"""
 
@@ -137,12 +153,19 @@ def get_healthy_time(target_group_arn, instance_id, port):
     """Poll until an instance:port is healthy and return the current time"""
 
     elbv2 = boto3.client('elbv2')
-    targets = [
-        {
-            "Id": instance_id,
-            "Port": port
-        }
-    ]
+    if port:
+        targets = [
+            {
+                "Id": instance_id,
+                "Port": port
+            }
+        ]
+    else:
+        targets = [
+            {
+                "Id": instance_id
+            }
+        ]
     response = elbv2.describe_target_health(
         TargetGroupArn=target_group_arn,
         Targets=targets
@@ -167,6 +190,8 @@ def get_time_to_in_service_from_event(event):
 
     logging.info(json.dumps({"message": "received event", "event": event}))
     targets = event['requestParameters']['targets']
+    target_group_arn = event['requestParameters']['targetGroupArn']
+    target_group = target_group_arn.split(':')[-1]
     if event['userIdentity']['invokedBy'] == 'ecs.amazonaws.com':
         event_type = 'ecs'
     else:
@@ -174,8 +199,6 @@ def get_time_to_in_service_from_event(event):
     for target in targets:
         instance_id = target['id']
         port = target.get('port', None)
-        target_group_arn = event['requestParameters']['targetGroupArn']
-        target_group = target_group_arn.split(':')[-1]
         if event_type == 'ecs':
             request_time = get_container_request_time(instance_id, port)
         elif event_type == 'ec2':
@@ -209,6 +232,7 @@ def flask_health():
 def flask_handler():
     data = request.get_json(force=True)
     logging.info(json.dumps({"message": "received post", "data": data}))
+    set_region()
     if not os.environ['TIMETOINSERVICE_TOPICARN'] == data.get('TopicArn'):
             logging.info(json.dumps({"message": "not from SNS, ignoring"}))
             return '', 204
@@ -226,11 +250,14 @@ def flask_handler():
         seconds = get_time_to_in_service_from_event(event)
     except:
         logging.exception(json.dumps({"message": "failed to get seconds"}))
-        raise
+        return '', 500
 
     if seconds:
+        target_group_arn = event['requestParameters']['targetGroupArn']
+        target_group = target_group_arn.split(':')[-1]
         put_cw_data(seconds, target_group)
     else:
+        logging.info(json.dumps({"message": "service already healthy, coud not retrieve seconds"}))
         return '', 200
 
     return json.dumps({'status': 'done'})
