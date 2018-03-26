@@ -239,14 +239,14 @@ def put_time_to_in_service_from_event(event):
     for target in targets:
         instance_id = target['id']
         port = target.get('port', None)
-        if event_type == 'ecs':
-            request_time = get_container_request_time(instance_id, port)
-        elif event_type == 'ec2':
-            request_time = get_instance_request_time(instance_id)
         healthy_time = get_healthy_time(target_group_arn, instance_id, port)
         if not healthy_time:
             logging.info(json.dumps({"message": "service already healthy, coud not retrieve seconds"}))
             return
+        if event_type == 'ecs':
+            request_time = get_container_request_time(instance_id, port)
+        elif event_type == 'ec2':
+            request_time = get_instance_request_time(instance_id)
         logging.info(json.dumps({"message": "listing tzinfo", "healthy_time": healthy_time.tzinfo, "request_time": request_time.tzinfo}, default=str))
         time_to_in_service = (healthy_time - request_time)
         logging.info(json.dumps({"message": "TimeToInService calculated", "TimeToInService": time_to_in_service.seconds, "target_group_arn": target_group_arn}))
