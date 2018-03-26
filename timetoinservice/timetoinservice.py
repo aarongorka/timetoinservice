@@ -23,6 +23,9 @@ import requests
 * output difference to CloudWatch with TG (?) as dimension
 """
 
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
 aws_lambda_logging.setup(level=os.environ.get('LOGLEVEL', 'INFO'), env=os.environ.get('ENV'))
 logging.info(json.dumps({'message': 'initialising'}))
 aws_lambda_logging.setup(level=os.environ.get('LOGLEVEL', 'INFO'), env=os.environ.get('ENV'))
@@ -162,9 +165,6 @@ def get_healthy_time(target_group_arn, instance_id, port):
 def put_time_to_in_service_from_event(event):
     """Calculate and upload the TimeToInService metric from a given RegisterTarget event"""
 
-    if event['eventName'] != "RegisterTargets":
-        return json.dumps({"message": "not a RegisterTargets event, doing nothing"})
-
     logging.info(json.dumps({"message": "received event", "event": event}))
     resources = event['Resources']
     if event['userIdentity']['invokedBy'] == 'ecs.amazonaws.com':
@@ -204,12 +204,18 @@ def flask_health():
 @app.route('/timetoinservice/registertargets', methods=['POST'])
 def flask_handler():
     data = request.get_json(force=True)
-    logging.debug(json.dumps({"message": "received post", "data": data}))
+    logging.info(json.dumps({"message": "received post", "data": data}))
     if data.get('Type', None) == "SubscriptionConfirmation":
         response = requests.get(data['SubscribeURL'])
         return json.dumps({'subscription confirmation': 'sent', 'response': response.status_code})
-    event = json.loads(data['Message'])
-    put_time_to_in_service_from_event(event)
+    try:
+        event = json.loads(data['Message'])
+        if event.get('eventName') != "RegisterTargets":
+            logging.info(json.dumps({"message": "not a RegisterTargets event, doing nothing"}))
+            return '', 204
+        put_time_to_in_service_from_event(event)
+    except:
+        logging.exception(json.dumps({"message": "failed to put metric"}))
     return json.dumps({'status': 'done'})
 
 
