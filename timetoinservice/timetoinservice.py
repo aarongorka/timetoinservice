@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import boto3
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil.tz import tzlocal, tzutc
 import logging
 import aws_lambda_logging
@@ -52,7 +52,7 @@ def get_instance_request_time(instance_id):
                     'AttributeValue': spot_request_id
                 }
             ],
-            StartTime=datetime.utcnow() - datetime.timedelta(minutes=60),
+            StartTime=datetime.utcnow() - timedelta(minutes=60),
             EndTime=datetime.utcnow()
         )
         event = [x for x in response['Events'] if x['EventName'] == 'RequestSpotInstances'][0]
@@ -68,7 +68,7 @@ def get_instance_request_time(instance_id):
                     'AttributeValue': instance_id
                 }
             ],
-            StartTime=datetime.utcnow() - datetime.timedelta(minutes=10),
+            StartTime=datetime.utcnow() - timedelta(minutes=10),
             EndTime=datetime.utcnow()
         )
         event = [x for x in response['Events'] if x['EventName'] == 'CreateInstance'][0]
@@ -229,7 +229,7 @@ if __name__ == '__main__':
 #                    'AttributeValue': 'RegisterTargets'
 #            }
 #        ],
-#        StartTime=datetime.utcnow() - datetime.timedelta(hours=3),
+#        StartTime=datetime.utcnow() - timedelta(hours=3),
 #        EndTime=datetime.utcnow(),
 #        MaxResults=10
 #    )
