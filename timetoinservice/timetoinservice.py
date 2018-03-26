@@ -204,9 +204,13 @@ def flask_health():
 def flask_handler():
     data = request.get_json(force=True)
     logging.info(json.dumps({"message": "received post", "data": data}))
-    if data.get('Type', None) == "SubscriptionConfirmation":
+    if not os.environ['TIMETOINSERVICE_TOPICARN'] == data.get('TopicArn'):
+            logging.info(json.dumps({"message": "not from SNS, ignoring"}))
+            return '', 204
+    if data.get('Type') == "SubscriptionConfirmation":
         response = requests.get(data['SubscribeURL'])
-        return json.dumps({'subscription confirmation': 'sent', 'response': response.status_code})
+        logging.info(json.dumps({'subscription confirmation': 'sent', 'response': response.status_code}))
+        return ''
     try:
         event = json.loads(data['Message']).get('detail')
         if event.get('eventName') != "RegisterTargets":
