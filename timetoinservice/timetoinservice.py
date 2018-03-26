@@ -150,7 +150,7 @@ def get_healthy_time(target_group_arn, instance_id, port):
     state = response['TargetHealthDescriptions'][0]['TargetHealth']['State']
     logging.info(json.dumps({"message": "confirming target initial state", "state": state, "target_group_arn": target_group_arn, "targets": targets}))
     if state == "healthy":
-        raise Exception('Target already healthy')  # if the target is already healthy, we probably started polling too late
+        return None  # if the target is already healthy, we probably started polling too late
     waiter = elbv2.get_waiter('target_in_service')
     logging.info(json.dumps({"message": "polling until healthy", "target_group_arn": target_group_arn, "targets": targets}))
     waiter.wait(
@@ -162,7 +162,7 @@ def get_healthy_time(target_group_arn, instance_id, port):
     return time
 
 
-def put_time_to_in_service_from_event(event):
+def get_time_to_in_service_from_event(event):
     """Calculate and upload the TimeToInService metric from a given RegisterTarget event"""
 
     logging.info(json.dumps({"message": "received event", "event": event}))
@@ -181,8 +181,13 @@ def put_time_to_in_service_from_event(event):
         elif event_type == 'ec2':
             request_time = get_instance_request_time(instance_id)
         healthy_time = get_healthy_time(target_group_arn, instance_id, port)
+        if not healthy_time:
+            return None
         time_to_in_service = (healthy_time - request_time)
         logging.info(json.dumps({"message": "TimeToInService calculated", "TimeToInService": time_to_in_service.seconds, "target_group_arn": target_group_arn}))
+        return time_to_in_service.seconds
+
+def put_cw_data(target_group, seconds):
         cloudwatch = boto3.client('cloudwatch')
         response = cloudwatch.put_metric_data(
             Namespace='Scaling',
@@ -190,7 +195,7 @@ def put_time_to_in_service_from_event(event):
                 {
                     "MetricName": "TimeToInService",
                     "Dimensions": [{"Name": "TargetGroup", "Value": target_group}],
-                    "Value": time_to_in_service.seconds,
+                    "Value": seconds,
                     "Unit": "Seconds"
                 }
             ]
@@ -210,16 +215,24 @@ def flask_handler():
     if data.get('Type') == "SubscriptionConfirmation":
         response = requests.get(data['SubscribeURL'])
         logging.info(json.dumps({'subscription confirmation': 'sent', 'response': response.status_code}))
-        return ''
+        return '', 200
+
+    seconds = None
     try:
         event = json.loads(data['Message']).get('detail')
         if event.get('eventName') != "RegisterTargets":
             logging.info(json.dumps({"message": "not a RegisterTargets event, doing nothing"}))
             return '', 204
-        put_time_to_in_service_from_event(event)
+        seconds = get_time_to_in_service_from_event(event)
     except:
-        logging.exception(json.dumps({"message": "failed to put metric"}))
+        logging.exception(json.dumps({"message": "failed to get seconds"}))
         raise
+
+    if seconds:
+        put_cw_data(seconds, target_group)
+    else:
+        return '', 200
+
     return json.dumps({'status': 'done'})
 
 
@@ -240,4 +253,4 @@ if __name__ == '__main__':
 #    events = response['Events']
 #    logging.info(json.dumps({"message": "looking up RegisterTarget events", "num": len(events), "events": events}))
 #    for event in events:
-#        put_time_to_in_service_from_event(event)
+#        get_time_to_in_service_from_event(event)
