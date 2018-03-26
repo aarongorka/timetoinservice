@@ -7,6 +7,8 @@ import logging
 import aws_lambda_logging
 import json
 from flask import Flask,request
+from functools import wraps
+import requests
 
 """
 * RegisterTarget event
@@ -201,8 +203,11 @@ def flask_health():
 
 @app.route('/timetoinservice/registertargets', methods=['POST'])
 def flask_handler():
-    data = request.to_json(force=True)
+    data = request.get_json(force=True)
     logging.debug(json.dumps({"message": "received post", "data": data}))
+    if data['Type'] == "SubscriptionConfirmation":
+        response = requests.get(data['SubscribeURL'])
+        return json.dumps({'subscription confirmation': 'sent', 'response': response.status_code})
     event = data['Message']
     return json.dumps({'status': 'done'})
 

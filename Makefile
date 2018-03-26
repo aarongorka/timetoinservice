@@ -14,7 +14,6 @@ endif
 
 VERSION = 0.0.1
 IMAGE_NAME ?= aarongorka/timetoinservice
-TAG = v$(VERSION)
 
 dockerBuild:
 	docker build -t $(IMAGE_NAME):$(VERSION) .
@@ -28,10 +27,10 @@ dockerPush:
 	docker push $(IMAGE_NAME):latest
 
 gitTag:
-	-git tag -d $(TAG)
-	-git push origin :refs/tags/$(TAG)
-	git tag $(TAG)
-	git push origin $(TAG)
+	-git tag -d $(VERSION)
+	-git push origin :refs/tags/$(VERSION)
+	git tag $(VERSION)
+	git push origin $(VERSION)
 
 deploy: $(DOTENV_TARGET) $(ASSUME_REQUIRED)
 	docker-compose down
@@ -53,6 +52,7 @@ cleanup: $(DOTENV_TARGET) $(ASSUME_REQUIRED)
 	cp .env.template .env
 	echo "" >> .env
 	echo "BUILD_VERSION=$(BUILD_VERSION)" >> .env
+	echo "VERSION=$(VERSION)" >> .env
 
 # Create/Overwrite .env with $(DOTENV)
 dotenv:
