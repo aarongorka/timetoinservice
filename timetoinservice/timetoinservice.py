@@ -208,7 +208,8 @@ def flask_handler():
     if data.get('Type', None) == "SubscriptionConfirmation":
         response = requests.get(data['SubscribeURL'])
         return json.dumps({'subscription confirmation': 'sent', 'response': response.status_code})
-    event = data['Message']
+    event = json.loads(data['Message'])
+    put_time_to_in_service_from_event(event)
     return json.dumps({'status': 'done'})
 
 
