@@ -166,16 +166,15 @@ def put_time_to_in_service_from_event(event):
     """Calculate and upload the TimeToInService metric from a given RegisterTarget event"""
 
     logging.info(json.dumps({"message": "received event", "event": event}))
-    resources = event['Resources']
+    targets = event['requestParameters']['targets']
     if event['userIdentity']['invokedBy'] == 'ecs.amazonaws.com':
         event_type = 'ecs'
-        port = [target['port'] for target in event['requestParameters']['targets']]
     else:
         event_type = 'ec2'
-        port = None
-    for resource in resources:
-        instance_id = [x['ResourceName'] for x in resource if x['ResourceType'] == 'AWS::EC2::Instance'][0]
-        target_group_arn = [x['ResourceName'] for x in resource if x['ResourceType'] == 'AWS::ElasticLoadBalancingV2::TargetGroup'][0]
+    for target in targets:
+        instance_id = target['id']
+        port = target.get('port', None)
+        target_group_arn = event['requestParameters']['targetGroupArn']
         target_group = target_group_arn.split(':')[-1]
         if event_type == 'ecs':
             request_time = get_container_request_time(instance_id, port)
@@ -209,13 +208,14 @@ def flask_handler():
         response = requests.get(data['SubscribeURL'])
         return json.dumps({'subscription confirmation': 'sent', 'response': response.status_code})
     try:
-        event = json.loads(data['Message'])
+        event = json.loads(data['Message']).get('detail')
         if event.get('eventName') != "RegisterTargets":
             logging.info(json.dumps({"message": "not a RegisterTargets event, doing nothing"}))
             return '', 204
         put_time_to_in_service_from_event(event)
     except:
         logging.exception(json.dumps({"message": "failed to put metric"}))
+        raise
     return json.dumps({'status': 'done'})
 
 
