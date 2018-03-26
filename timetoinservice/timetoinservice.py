@@ -197,8 +197,8 @@ def get_healthy_time(target_group_arn, instance_id, port):
     )
     state = response['TargetHealthDescriptions'][0]['TargetHealth']['State']
     logging.info(json.dumps({"message": "confirming target initial state", "state": state, "target_group_arn": target_group_arn, "targets": targets}))
-#    if state == "healthy":
-#        return None  # if the target is already healthy, we probably started polling too late
+    if state == "healthy":
+        return None  # if the target is already healthy, we probably started polling too late
     waiter = elbv2.get_waiter('target_in_service')
     logging.info(json.dumps({"message": "polling until healthy", "target_group_arn": target_group_arn, "targets": targets}))
     waiter.wait(
