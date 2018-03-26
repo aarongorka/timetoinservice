@@ -162,7 +162,7 @@ def get_healthy_time(target_group_arn, instance_id, port):
 def put_time_to_in_service_from_event(event):
     """Calculate and upload the TimeToInService metric from a given RegisterTarget event"""
 
-    if event['EventName'] != "RegisterTargets":
+    if event['eventName'] != "RegisterTargets":
         return json.dumps({"message": "not a RegisterTargets event, doing nothing"})
 
     logging.info(json.dumps({"message": "received event", "event": event}))
