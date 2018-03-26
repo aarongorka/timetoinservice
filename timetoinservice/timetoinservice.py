@@ -205,7 +205,7 @@ def flask_health():
 def flask_handler():
     data = request.get_json(force=True)
     logging.debug(json.dumps({"message": "received post", "data": data}))
-    if data['Type'] == "SubscriptionConfirmation":
+    if data.get('Type', None) == "SubscriptionConfirmation":
         response = requests.get(data['SubscribeURL'])
         return json.dumps({'subscription confirmation': 'sent', 'response': response.status_code})
     event = data['Message']
