@@ -6,7 +6,7 @@ from dateutil.tz import tzlocal, tzutc
 import logging
 import aws_lambda_logging
 import json
-from flask import Flask,request
+from flask import Flask, request
 from functools import wraps
 import requests
 import time
@@ -38,7 +38,7 @@ def set_region():
     region = None
     session = boto3.session.Session()
     region = session.region_name
-    if region: # already defined in env var or config file
+    if region:  # already defined in env var or config file
         return
     else:
         try:
@@ -61,7 +61,7 @@ def get_instance_request_time(instance_id):
     if instance['InstanceLifecycle'] == 'spot':
         spot_request_id = instance['SpotInstanceRequestId']
         logging.info(json.dumps({"message": "getting spot request time", "instance_id": instance_id, "spot_request_id": spot_request_id}))
-        lookup_attributes=[
+        lookup_attributes = [
             {
                 'AttributeKey': 'ResourceName',
                 'AttributeValue': spot_request_id
@@ -76,7 +76,7 @@ def get_instance_request_time(instance_id):
         logging.info(json.dumps({"message": "found spot request time", "instance_id": instance_id, "spot_request_id": spot_request_id, "request_time": request_time.timestamp()}))
     else:
         logging.info(json.dumps({"message": "getting on-demand request time", "instance_id": instance_id}))
-        lookup_attributes=[
+        lookup_attributes = [
             {
                 'AttributeKey': 'ResourceName',
                 'AttributeValue': instance_id
@@ -84,7 +84,7 @@ def get_instance_request_time(instance_id):
         ]
         response = wait_for_cloudtrail_query(lookup_attributes)
         if not response:
-            logging.warning(json.dumps({"message": "timed out getting spot instance request info"}))
+            logging.warning(json.dumps({"message": "timed out getting spot instance request info", "instance_id": instance_id}))
             return
         event = [x for x in response['Events'] if x['EventName'] == 'CreateInstance'][0]
         request_time = event['EventTime']
@@ -241,7 +241,7 @@ def put_time_to_in_service_from_event(event):
         port = target.get('port', None)
         healthy_time = get_healthy_time(target_group_arn, instance_id, port)
         if not healthy_time:
-            logging.info(json.dumps({"message": "service already healthy, coud not retrieve seconds"}))
+            logging.info(json.dumps({"message": "service already healthy, coud not retrieve seconds", "target_group_arn": target_group_arn, "instance_id": instance_id, "port": port}))
             return
         if event_type == 'ecs':
             request_time = get_container_request_time(instance_id, port)
@@ -257,6 +257,7 @@ def put_time_to_in_service_from_event(event):
 @app.route('/timetoinservice/health', methods=['GET'])
 def flask_health():
     return json.dumps({'health': 'OK'})
+
 
 @app.route('/timetoinservice/registertargets', methods=['POST'])
 def flask_handler():
@@ -283,8 +284,9 @@ def flask_handler():
 
     return json.dumps({'status': 'done'})
 
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0')
+    app.run(host='0.0.0.0', threaded=True)
 #    cloudtrail = boto3.client('cloudtrail')
 #    response = cloudtrail.lookup_events(
 #        LookupAttributes=[
