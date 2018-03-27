@@ -3,3 +3,7 @@ deployment/ecs-config-env.yml
 .env*
 !.env.template
 
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
