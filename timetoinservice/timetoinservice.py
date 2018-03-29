@@ -210,14 +210,14 @@ def get_healthy_time(target_group_arn, instance_id, port):
     return time
 
 
-def put_cw_data(seconds, target_group):
+def put_cw_data(seconds, dimensions):
         cloudwatch = boto3.client('cloudwatch')
         response = cloudwatch.put_metric_data(
             Namespace='Scaling',
             MetricData=[
                 {
                     "MetricName": "TimeToInService",
-                    "Dimensions": [{"Name": "TargetGroup", "Value": target_group}],
+                    "Dimensions": dimensions,
                     "Value": seconds,
                     "Unit": "Seconds"
                 }
@@ -225,7 +225,7 @@ def put_cw_data(seconds, target_group):
         )
 
 
-def put_time_to_in_service_from_event(event):
+def put_time_to_in_service_from_registertarget(event):
     """Calculate and upload the TimeToInService metric from a given RegisterTarget event"""
 
     logging.info(json.dumps({"message": "received event", "event": event}))
@@ -250,8 +250,49 @@ def put_time_to_in_service_from_event(event):
         logging.info(json.dumps({"message": "listing tzinfo", "healthy_time": healthy_time.tzinfo, "request_time": request_time.tzinfo}, default=str))
         time_to_in_service = (healthy_time - request_time)
         logging.info(json.dumps({"message": "TimeToInService calculated", "TimeToInService": time_to_in_service.seconds, "target_group_arn": target_group_arn}))
+        dimensions = [{"Name": "TargetGroup", "Value": target_group}]
+        put_cw_data(time_to_in_service.seconds, dimensions)
 
-        put_cw_data(time_to_in_service.seconds, target_group)
+
+def get_asg_from_instance_id(instance_id):
+    asg = boto3.client('asg')
+    response = asg.describe_auto_scaling_instances(
+        InstanceIds=[
+            instance_id
+        ]
+    )
+    asg = [instance['AutoScalingGroupName'] for instance in response['AutoScalingInstances']][0]
+    return asg
+
+
+def get_instance_from_ip(ip):
+    ec2 = boto3.client('ec2')
+    response = ec2.describe_instances(
+        Filters=[
+            {
+                "Name": "ip-address",
+                "Value": ip
+            }
+        ]
+    )
+    instance = [x['Instances'][0] for x in response['Reservations']][0]
+    return instance
+
+
+def put_time_to_in_service_from_signalresource(event):
+    """Calculate and upload the TimeToInService metric from a given SignalResource event"""
+
+    logging.info(json.dumps({"message": "received event", "event": event}))
+    ip = event['sourceIPAddress']
+    signal_time = event['eventTime']
+    instance = get_instance_from_ip(ip)
+    instance_id = instance['InstanceId']
+    request_time = get_instance_request_time(instance_id)
+    time_to_in_service = (signal_time - request_time)
+    logging.info(json.dumps({"message": "TimeToInService calculated", "TimeToInService": time_to_in_service.seconds}))
+    asg = get_asg_from_instance_id(instance_id)
+    dimensions = [{"Name": "AutoScalingGroupName", "Value": asg}]
+    put_cw_data(time_to_in_service.seconds, dimensions)
 
 
 @app.route('/timetoinservice/health', methods=['GET'])
@@ -259,7 +300,7 @@ def flask_health():
     return json.dumps({'health': 'OK'})
 
 
-@app.route('/timetoinservice/registertargets', methods=['POST'])
+@app.route('/timetoinservice/event', methods=['POST'])
 def flask_handler():
     data = request.get_json(force=True)
     logging.info(json.dumps({"message": "received post", "data": data}))
@@ -274,10 +315,13 @@ def flask_handler():
 
     try:
         event = json.loads(data['Message']).get('detail')
-        if event.get('eventName') != "RegisterTargets":
-            logging.info(json.dumps({"message": "not a RegisterTargets event, doing nothing"}))
+        if event.get('eventName') == "RegisterTargets":
+            put_time_to_in_service_from_registertarget(event)
+        elif event.get('eventName') == "SignalResource":
+            put_time_to_in_service_from_signalresource(event)
+        else:
+            logging.info(json.dumps({"message": "not a supported event, doing nothing"}))
             return '', 204
-        put_time_to_in_service_from_event(event)
     except:
         logging.exception(json.dumps({"message": "failed to put time_to_in_seconds"}))
         return '', 500
@@ -286,20 +330,4 @@ def flask_handler():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', threaded=True)
-#    cloudtrail = boto3.client('cloudtrail')
-#    response = cloudtrail.lookup_events(
-#        LookupAttributes=[
-#            {
-#                    'AttributeKey': 'EventName',
-#                    'AttributeValue': 'RegisterTargets'
-#            }
-#        ],
-#        StartTime=datetime.utcnow() - timedelta(hours=3),
-#        EndTime=datetime.utcnow(),
-#        MaxResults=10
-#    )
-#    events = response['Events']
-#    logging.info(json.dumps({"message": "looking up RegisterTarget events", "num": len(events), "events": events}))
-#    for event in events:
-#        put_time_to_in_service_from_event(event)
+    app.run(host='0.0.0.0', threaded=True)  # threaded to allow healthchecks while serving a request
