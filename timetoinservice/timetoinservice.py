@@ -297,7 +297,7 @@ def put_time_to_in_service_from_signalresource(event):
 
 @app.route('/timetoinservice/health', methods=['GET'])
 def flask_health():
-    return json.dumps({'health': 'OK'})
+    return json.dumps({'health': 'OK', 'version': os.environ.get('VERSION')})
 
 
 @app.route('/timetoinservice/event', methods=['POST'])
