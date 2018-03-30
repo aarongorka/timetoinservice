@@ -107,10 +107,10 @@ def wait_for_cloudtrail_query(lookup_attributes):
             )
         except botocore.exceptions.ClientError:
             logging.exception(json.dumps({"message": "could not query cloudtrail due to throttling, sleeping for 15s", "lookup_attributes": lookup_attributes, "response": response}, default=str))
-            time.sleep(15)
+            time.sleep(60)
         if response['Events'] == []:
             logging.info(json.dumps({"message": "cloudtrail event not found, sleeping for 5s", "lookup_attributes": lookup_attributes, "response": response}, default=str))
-            time.sleep(5)
+            time.sleep(30)
     if response['Events']:
         end = datetime.utcnow()
         time_taken = (end - start).seconds
