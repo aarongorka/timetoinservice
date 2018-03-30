@@ -10,6 +10,7 @@ from flask import Flask, request
 from functools import wraps
 import requests
 import time
+import dateutil.parser
 
 """
 * RegisterTarget event
@@ -98,13 +99,17 @@ def wait_for_cloudtrail_query(lookup_attributes):
     response = {"Events": []}
     while response['Events'] == [] and (datetime.utcnow() - start).seconds < 300:
         cloudtrail = boto3.client('cloudtrail')
-        response = cloudtrail.lookup_events(
-            LookupAttributes=lookup_attributes,
-            StartTime=datetime.utcnow() - timedelta(minutes=120),
-            EndTime=datetime.utcnow()
-        )
+        try:
+            response = cloudtrail.lookup_events(
+                LookupAttributes=lookup_attributes,
+                StartTime=datetime.utcnow() - timedelta(minutes=120),
+                EndTime=datetime.utcnow()
+            )
+        except botocore.exceptions.ClientError:
+            logging.exception(json.dumps({"message": "could not query cloudtrail due to throttling, sleeping for 15s", "lookup_attributes": lookup_attributes, "response": response}, default=str))
+            time.sleep(15)
         if response['Events'] == []:
-            logging.info(json.dumps({"message": "cloudtrail event not found, sleeping", "lookup_attributes": lookup_attributes, "response": response}, default=str))
+            logging.info(json.dumps({"message": "cloudtrail event not found, sleeping for 5s", "lookup_attributes": lookup_attributes, "response": response}, default=str))
             time.sleep(5)
     if response['Events']:
         end = datetime.utcnow()
@@ -285,7 +290,7 @@ def put_time_to_in_service_from_signalresource(event):
 
     logging.info(json.dumps({"message": "received event", "event": event}))
     ip = event['sourceIPAddress']
-    signal_time = event['eventTime']
+    signal_time = dateutil.parser.parse(event['eventTime'])
     instance = get_instance_from_ip(ip)
     instance_id = instance['InstanceId']
     request_time = get_instance_request_time(instance_id)
