@@ -271,7 +271,7 @@ def get_instance_from_ip(ip):
         Filters=[
             {
                 "Name": "ip-address",
-                "Values": ip
+                "Values": [ip]
             }
         ]
     )
