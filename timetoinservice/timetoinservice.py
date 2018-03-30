@@ -58,7 +58,7 @@ def get_instance_request_time(instance_id):
         InstanceIds=[instance_id]
     )
     instance = [x['Instances'][0] for x in response['Reservations']][0]
-    if instance['InstanceLifecycle'] == 'spot':
+    if instance.get('InstanceLifecycle') == 'spot':
         spot_request_id = instance['SpotInstanceRequestId']
         logging.info(json.dumps({"message": "getting spot request time", "instance_id": instance_id, "spot_request_id": spot_request_id}))
         lookup_attributes = [
@@ -276,6 +276,7 @@ def get_instance_from_ip(ip):
         ]
     )
     instance = [x['Instances'][0] for x in response['Reservations']][0]
+    logging.info(json.dumps({"message": "finding instance from IP", "instance": instance}, default=str))
     return instance
 
 
