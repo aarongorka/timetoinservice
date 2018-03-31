@@ -97,7 +97,8 @@ def wait_for_cloudtrail_query(lookup_attributes):
     start = datetime.utcnow()
     logging.info(json.dumps({"message": "beginning to poll for cloudtrail event", "lookup_attributes": lookup_attributes}))
     response = {"Events": []}
-    while response['Events'] == [] and (datetime.utcnow() - start).seconds < 300:
+    query_timeout = os.environ.get('TIMETOINSERVICE_CLOUDTRAIL_QUERY_TIMEOUT', 900)
+    while response['Events'] == [] and (datetime.utcnow() - start).seconds < query_timeout:
         cloudtrail = boto3.client('cloudtrail')
         try:
             response = cloudtrail.lookup_events(
@@ -106,18 +107,20 @@ def wait_for_cloudtrail_query(lookup_attributes):
                 EndTime=datetime.utcnow()
             )
         except botocore.exceptions.ClientError:
-            logging.exception(json.dumps({"message": "could not query cloudtrail due to throttling, sleeping for 15s", "lookup_attributes": lookup_attributes, "response": response}, default=str))
-            time.sleep(60)
+            throttle_sleep = os.environ.get('TIMETOINSERVICE_CLOUDTRAIL_THROTTLE_SLEEP', 60)
+            logging.exception(json.dumps({"message": "could not query cloudtrail due to throttling, sleeping", "throttle_sleep": throttle_sleep, "lookup_attributes": lookup_attributes, "response": response}, default=str))
+            time.sleep(throttle_sleep)
         if response['Events'] == []:
-            logging.info(json.dumps({"message": "cloudtrail event not found, sleeping for 5s", "lookup_attributes": lookup_attributes, "response": response}, default=str))
-            time.sleep(30)
+            query_sleep = os.environ.get('TIMETOINSERVICE_CLOUDTRAIL_QUERY_SLEEP', 30)
+            logging.info(json.dumps({"message": "cloudtrail event not found, sleeping", "query_sleep": query_sleep, "lookup_attributes": lookup_attributes, "response": response}, default=str))
+            time.sleep(query_sleep)
     if response['Events']:
         end = datetime.utcnow()
         time_taken = (end - start).seconds
         logging.info(json.dumps({"message": "cloudtrail found", "lookup_attributes": lookup_attributes, "response": response}, default=str))
         return response
     else:
-        logging.info(json.dumps({"message": "cloudtrail event not found and timeout reached", "lookup_attributes": lookup_attributes, "response": response}, default=str))
+        logging.info(json.dumps({"message": "cloudtrail event not found and timeout reached", "time_taken": (datetime.utcnow() - start).seconds, "query_timeout": query_timeout, "lookup_attributes": lookup_attributes, "response": response}, default=str))
         return None
 
 

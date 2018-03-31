@@ -12,7 +12,7 @@ else
 	DOTENV_TARGET=.env
 endif
 
-VERSION = 0.0.6
+VERSION = 0.0.7
 IMAGE_NAME ?= aarongorka/timetoinservice
 
 dockerBuild:
@@ -27,8 +27,6 @@ dockerPush:
 	docker push $(IMAGE_NAME):latest
 
 gitTag:
-	-git tag -d $(VERSION)
-	-git push origin :refs/tags/$(VERSION)
 	git tag $(VERSION)
 	git push origin $(VERSION)
 
